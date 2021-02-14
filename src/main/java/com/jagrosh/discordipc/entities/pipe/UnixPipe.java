@@ -32,14 +32,12 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 
-public class UnixPipe extends Pipe
-{
+public class UnixPipe extends Pipe {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(UnixPipe.class);
     private final AFUNIXSocket socket;
 
-    UnixPipe(IPCClient ipcClient, HashMap<String, Callback> callbacks, String location) throws IOException
-    {
+    UnixPipe(IPCClient ipcClient, HashMap<String, Callback> callbacks, String location) throws IOException {
         super(ipcClient, callbacks);
 
         socket = AFUNIXSocket.newInstance();
@@ -48,15 +46,14 @@ public class UnixPipe extends Pipe
 
     @SuppressWarnings("ResultOfMethodCallIgnored")
     @Override
-    public Packet read() throws IOException, JSONException
-    {
+    public Packet read() throws IOException, JSONException {
         InputStream is = socket.getInputStream();
 
-        while(is.available() == 0 && status == PipeStatus.CONNECTED)
-        {
+        while (is.available() == 0 && status == PipeStatus.CONNECTED) {
             try {
                 Thread.sleep(50);
-            } catch(InterruptedException ignored) {}
+            } catch (InterruptedException ignored) {
+            }
         }
 
         /*byte[] buf = new byte[is.available()];
@@ -65,10 +62,10 @@ public class UnixPipe extends Pipe
 
         if (true) return null;*/
 
-        if(status==PipeStatus.DISCONNECTED)
+        if (status == PipeStatus.DISCONNECTED)
             throw new IOException("Disconnected!");
 
-        if(status==PipeStatus.CLOSED)
+        if (status == PipeStatus.CLOSED)
             return new Packet(Packet.OpCode.CLOSE, null);
 
         // Read the op and length. Both are signed ints
@@ -82,20 +79,18 @@ public class UnixPipe extends Pipe
         is.read(d);
         Packet p = new Packet(op, new JSONObject(new String(d)));
         LOGGER.debug(String.format("Received packet: %s", p.toString()));
-        if(listener != null)
+        if (listener != null)
             listener.onPacketReceived(ipcClient, p);
         return p;
     }
 
     @Override
-    public void write(byte[] b) throws IOException
-    {
+    public void write(byte[] b) throws IOException {
         socket.getOutputStream().write(b);
     }
 
     @Override
-    public void close() throws IOException
-    {
+    public void close() throws IOException {
         LOGGER.debug("Closing IPC pipe...");
         send(Packet.OpCode.CLOSE, new JSONObject(), null);
         status = PipeStatus.CLOSED;
