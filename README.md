@@ -5,6 +5,8 @@
 [ ![version][] ][download]
 [ ![license][] ](https://github.com/jagrosh/DiscordIPC/tree/master/LICENSE)
 
+*This is a fork of [DiscordIPC](https://github.com/jagrosh/DiscordIPC) which adds support for rich presence buttons.*
+
 # DiscordIPC
 
 Connect locally to the Discord client using IPC for a subset of RPC features like Rich Presence and Activity Join/Spectate
