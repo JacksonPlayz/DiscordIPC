@@ -15,13 +15,17 @@
  */
 package com.jagrosh.discordipc;
 
-import com.jagrosh.discordipc.entities.*;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.jagrosh.discordipc.entities.Callback;
+import com.jagrosh.discordipc.entities.DiscordBuild;
+import com.jagrosh.discordipc.entities.Packet;
 import com.jagrosh.discordipc.entities.Packet.OpCode;
+import com.jagrosh.discordipc.entities.RichPresence;
+import com.jagrosh.discordipc.entities.User;
 import com.jagrosh.discordipc.entities.pipe.Pipe;
 import com.jagrosh.discordipc.entities.pipe.PipeStatus;
 import com.jagrosh.discordipc.exceptions.NoDiscordClientException;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,6 +74,16 @@ public final class IPCClient implements Closeable {
      */
     public IPCClient(long clientId) {
         this.clientId = clientId;
+    }
+
+    /**
+     * Finds the current process ID.
+     *
+     * @return The current process ID.
+     */
+    private static int getPID() {
+        String pr = ManagementFactory.getRuntimeMXBean().getName();
+        return Integer.parseInt(pr.substring(0, pr.indexOf('@')));
     }
 
     /**
@@ -149,11 +163,16 @@ public final class IPCClient implements Closeable {
     public void sendRichPresence(RichPresence presence, Callback callback) {
         checkConnected(true);
         LOGGER.debug("Sending RichPresence to discord: " + (presence == null ? null : presence.toJson().toString()));
-        pipe.send(OpCode.FRAME, new JSONObject()
-                .put("cmd", "SET_ACTIVITY")
-                .put("args", new JSONObject()
-                        .put("pid", getPID())
-                        .put("activity", presence == null ? null : presence.toJson())), callback);
+
+        JsonObject payload = new JsonObject();
+        JsonObject args = new JsonObject();
+        args.addProperty("pid", getPID());
+        args.add("activity", presence == null ? null : presence.toJson());
+
+        payload.addProperty("cmd", "SET_ACTIVITY");
+        payload.add("args", args);
+
+        pipe.send(OpCode.FRAME, payload, callback);
     }
 
     /**
@@ -190,9 +209,11 @@ public final class IPCClient implements Closeable {
         if (!sub.isSubscribable())
             throw new IllegalStateException("Cannot subscribe to " + sub + " event!");
         LOGGER.debug(String.format("Subscribing to Event: %s", sub.name()));
-        pipe.send(OpCode.FRAME, new JSONObject()
-                .put("cmd", "SUBSCRIBE")
-                .put("evt", sub.name()), callback);
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("cmd", "SUBCRIBE");
+        payload.addProperty("evt", sub.name());
+        pipe.send(OpCode.FRAME, payload, callback);
     }
 
     /**
@@ -244,6 +265,114 @@ public final class IPCClient implements Closeable {
         return pipe.getDiscordBuild();
     }
 
+
+    // Private methods
+
+    /**
+     * Makes sure that the client is connected (or not) depending on if it should
+     * for the current state.
+     *
+     * @param connected Whether to check in the context of the IPCClient being
+     *                  connected or not.
+     */
+    private void checkConnected(boolean connected) {
+        if (connected && getStatus() != PipeStatus.CONNECTED)
+            throw new IllegalStateException(String.format("IPCClient (ID: %d) is not connected!", clientId));
+        if (!connected && getStatus() == PipeStatus.CONNECTED)
+            throw new IllegalStateException(String.format("IPCClient (ID: %d) is already connected!", clientId));
+    }
+
+    /**
+     * Initializes this IPCClient's {@link IPCClient#readThread readThread}
+     * and calls the first {@link Pipe#read()}.
+     */
+    private void startReading() {
+        readThread = new Thread(() -> {
+            try {
+                Packet p;
+                while ((p = pipe.read()).getOp() != OpCode.CLOSE) {
+                    JsonObject json = p.getJson();
+                    if (json == null) continue;
+
+                    Event event = Event.of(json.has("evt") && !json.get("evt").isJsonNull() ? json.getAsJsonPrimitive("evt").getAsString() : null);
+                    String nonce = json.has("nonce") && !json.get("nonce").isJsonNull() ? json.getAsJsonPrimitive("nonce").getAsString() : null;
+                    switch (event) {
+                        case NULL:
+                            if (nonce != null && callbacks.containsKey(nonce))
+                                callbacks.remove(nonce).succeed(p);
+                            break;
+
+                        case ERROR:
+                            if (nonce != null && callbacks.containsKey(nonce))
+                                callbacks.remove(nonce).fail(json.getAsJsonObject("data").has("message") ? json.getAsJsonObject("data").getAsJsonObject("message").getAsString() : null);
+                            break;
+
+                        case ACTIVITY_JOIN:
+                            LOGGER.debug("Reading thread received a 'join' event.");
+                            break;
+
+                        case ACTIVITY_SPECTATE:
+                            LOGGER.debug("Reading thread received a 'spectate' event.");
+                            break;
+
+                        case ACTIVITY_JOIN_REQUEST:
+                            LOGGER.debug("Reading thread received a 'join request' event.");
+                            break;
+
+                        case UNKNOWN:
+                            LOGGER.debug("Reading thread encountered an event with an unknown type: " +
+                                    json.getAsJsonPrimitive("evt").getAsString());
+                            break;
+                    }
+                    if (listener != null && json.has("cmd") && json.getAsJsonPrimitive("cmd").getAsString().equals("DISPATCH")) {
+                        try {
+                            JsonObject data = json.getAsJsonObject("data");
+                            switch (Event.of(json.getAsJsonPrimitive("evt").getAsString())) {
+                                case ACTIVITY_JOIN:
+                                    listener.onActivityJoin(this, data.getAsJsonPrimitive("secret").getAsString());
+                                    break;
+
+                                case ACTIVITY_SPECTATE:
+                                    listener.onActivitySpectate(this, data.getAsJsonPrimitive("secret").getAsString());
+                                    break;
+
+                                case ACTIVITY_JOIN_REQUEST:
+                                    JsonObject u = data.getAsJsonObject("user");
+                                    User user = new User(
+                                            u.getAsJsonPrimitive("username").getAsString(),
+                                            u.getAsJsonPrimitive("discriminator").getAsString(),
+                                            Long.parseLong(u.getAsJsonPrimitive("id").getAsString()),
+                                            json.has("avatar") ? json.getAsJsonPrimitive("avatar").getAsString() : null
+                                    );
+                                    listener.onActivityJoinRequest(this, json.has("secret") ? json.getAsJsonObject("avatar").getAsString() : null, user);
+                                    break;
+                            }
+                        } catch (Exception e) {
+                            LOGGER.error("Exception when handling event: ", e);
+                        }
+                    }
+                }
+                pipe.setStatus(PipeStatus.DISCONNECTED);
+                if (listener != null)
+                    listener.onClose(this, p.getJson());
+            } catch (IOException | JsonParseException ex) {
+                if (ex instanceof IOException)
+                    LOGGER.error("Reading thread encountered an IOException", ex);
+                else
+                    LOGGER.error("Reading thread encountered a JsonParseException", ex);
+
+                pipe.setStatus(PipeStatus.DISCONNECTED);
+                if (listener != null)
+                    listener.onDisconnect(this, ex);
+            }
+        });
+
+        LOGGER.debug("Starting IPCClient reading thread!");
+        readThread.start();
+    }
+
+    // Private static methods
+
     /**
      * Constants representing events that can be subscribed to
      * using {@link #subscribe(Event)}.<p>
@@ -273,10 +402,6 @@ public final class IPCClient implements Closeable {
             this.subscribable = subscribable;
         }
 
-        public boolean isSubscribable() {
-            return subscribable;
-        }
-
         static Event of(String str) {
             if (str == null)
                 return NULL;
@@ -286,121 +411,9 @@ public final class IPCClient implements Closeable {
             }
             return UNKNOWN;
         }
-    }
 
-
-    // Private methods
-
-    /**
-     * Makes sure that the client is connected (or not) depending on if it should
-     * for the current state.
-     *
-     * @param connected Whether to check in the context of the IPCClient being
-     *                  connected or not.
-     */
-    private void checkConnected(boolean connected) {
-        if (connected && getStatus() != PipeStatus.CONNECTED)
-            throw new IllegalStateException(String.format("IPCClient (ID: %d) is not connected!", clientId));
-        if (!connected && getStatus() == PipeStatus.CONNECTED)
-            throw new IllegalStateException(String.format("IPCClient (ID: %d) is already connected!", clientId));
-    }
-
-    /**
-     * Initializes this IPCClient's {@link IPCClient#readThread readThread}
-     * and calls the first {@link Pipe#read()}.
-     */
-    private void startReading() {
-        readThread = new Thread(() -> {
-            try {
-                Packet p;
-                while ((p = pipe.read()).getOp() != OpCode.CLOSE) {
-                    JSONObject json = p.getJson();
-                    Event event = Event.of(json.optString("evt", null));
-                    String nonce = json.optString("nonce", null);
-                    switch (event) {
-                        case NULL:
-                            if (nonce != null && callbacks.containsKey(nonce))
-                                callbacks.remove(nonce).succeed(p);
-                            break;
-
-                        case ERROR:
-                            if (nonce != null && callbacks.containsKey(nonce))
-                                callbacks.remove(nonce).fail(json.getJSONObject("data").optString("message", null));
-                            break;
-
-                        case ACTIVITY_JOIN:
-                            LOGGER.debug("Reading thread received a 'join' event.");
-                            break;
-
-                        case ACTIVITY_SPECTATE:
-                            LOGGER.debug("Reading thread received a 'spectate' event.");
-                            break;
-
-                        case ACTIVITY_JOIN_REQUEST:
-                            LOGGER.debug("Reading thread received a 'join request' event.");
-                            break;
-
-                        case UNKNOWN:
-                            LOGGER.debug("Reading thread encountered an event with an unknown type: " +
-                                    json.getString("evt"));
-                            break;
-                    }
-                    if (listener != null && json.has("cmd") && json.getString("cmd").equals("DISPATCH")) {
-                        try {
-                            JSONObject data = json.getJSONObject("data");
-                            switch (Event.of(json.getString("evt"))) {
-                                case ACTIVITY_JOIN:
-                                    listener.onActivityJoin(this, data.getString("secret"));
-                                    break;
-
-                                case ACTIVITY_SPECTATE:
-                                    listener.onActivitySpectate(this, data.getString("secret"));
-                                    break;
-
-                                case ACTIVITY_JOIN_REQUEST:
-                                    JSONObject u = data.getJSONObject("user");
-                                    User user = new User(
-                                            u.getString("username"),
-                                            u.getString("discriminator"),
-                                            Long.parseLong(u.getString("id")),
-                                            u.optString("avatar", null)
-                                    );
-                                    listener.onActivityJoinRequest(this, data.optString("secret", null), user);
-                                    break;
-                            }
-                        } catch (Exception e) {
-                            LOGGER.error("Exception when handling event: ", e);
-                        }
-                    }
-                }
-                pipe.setStatus(PipeStatus.DISCONNECTED);
-                if (listener != null)
-                    listener.onClose(this, p.getJson());
-            } catch (IOException | JSONException ex) {
-                if (ex instanceof IOException)
-                    LOGGER.error("Reading thread encountered an IOException", ex);
-                else
-                    LOGGER.error("Reading thread encountered an JSONException", ex);
-
-                pipe.setStatus(PipeStatus.DISCONNECTED);
-                if (listener != null)
-                    listener.onDisconnect(this, ex);
-            }
-        });
-
-        LOGGER.debug("Starting IPCClient reading thread!");
-        readThread.start();
-    }
-
-    // Private static methods
-
-    /**
-     * Finds the current process ID.
-     *
-     * @return The current process ID.
-     */
-    private static int getPID() {
-        String pr = ManagementFactory.getRuntimeMXBean().getName();
-        return Integer.parseInt(pr.substring(0, pr.indexOf('@')));
+        public boolean isSubscribable() {
+            return subscribable;
+        }
     }
 }

@@ -16,14 +16,14 @@
 
 package com.jagrosh.discordipc.entities.pipe;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.jagrosh.discordipc.IPCClient;
 import com.jagrosh.discordipc.IPCListener;
 import com.jagrosh.discordipc.entities.Callback;
 import com.jagrosh.discordipc.entities.DiscordBuild;
 import com.jagrosh.discordipc.entities.Packet;
 import com.jagrosh.discordipc.exceptions.NoDiscordClientException;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,11 +35,13 @@ public abstract class Pipe {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Pipe.class);
     private static final int VERSION = 1;
+    // a list of system property keys to get IPC file from different unix systems.
+    private final static String[] unixPaths = {"XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"};
+    final IPCClient ipcClient;
+    private final HashMap<String, Callback> callbacks;
     PipeStatus status = PipeStatus.CONNECTING;
     IPCListener listener;
     private DiscordBuild build;
-    final IPCClient ipcClient;
-    private final HashMap<String, Callback> callbacks;
 
     Pipe(IPCClient ipcClient, HashMap<String, Callback> callbacks) {
         this.ipcClient = ipcClient;
@@ -62,13 +64,17 @@ public abstract class Pipe {
                 LOGGER.debug(String.format("Searching for IPC: %s", location));
                 pipe = createPipe(ipcClient, callbacks, location);
 
-                pipe.send(Packet.OpCode.HANDSHAKE, new JSONObject().put("v", VERSION).put("client_id", Long.toString(clientId)), null);
+                JsonObject payload = new JsonObject();
+                payload.addProperty("v", VERSION);
+                payload.addProperty("client_id", Long.toString(clientId));
+                pipe.send(Packet.OpCode.HANDSHAKE, payload, null);
 
                 Packet p = pipe.read(); // this is a valid client at this point
 
-                pipe.build = DiscordBuild.from(p.getJson().getJSONObject("data")
-                        .getJSONObject("config")
-                        .getString("api_endpoint"));
+                pipe.build = DiscordBuild.from(p.getJson()
+                        .getAsJsonObject("data")
+                        .getAsJsonObject("config")
+                        .get("api_endpoint").getAsString());
 
                 LOGGER.debug(String.format("Found a valid client (%s) with packet: %s", pipe.build.name(), p.toString()));
                 // we're done if we found our first choice
@@ -82,7 +88,7 @@ public abstract class Pipe {
 
                 pipe.build = null;
                 pipe = null;
-            } catch (IOException | JSONException ex) {
+            } catch (IOException | JsonParseException ex) {
                 pipe = null;
             }
         }
@@ -151,41 +157,6 @@ public abstract class Pipe {
     }
 
     /**
-     * Sends json with the given {@link Packet.OpCode}.
-     *
-     * @param op       The {@link Packet.OpCode} to send data with.
-     * @param data     The data to send.
-     * @param callback callback for the response
-     */
-    public void send(Packet.OpCode op, JSONObject data, Callback callback) {
-        try {
-            String nonce = generateNonce();
-            Packet p = new Packet(op, data.put("nonce", nonce));
-            if (callback != null && !callback.isEmpty())
-                callbacks.put(nonce, callback);
-            write(p.toBytes());
-            LOGGER.debug(String.format("Sent packet: %s", p.toString()));
-            if (listener != null)
-                listener.onPacketSent(ipcClient, p);
-        } catch (IOException ex) {
-            LOGGER.error("Encountered an IOException while sending a packet and disconnected!");
-            status = PipeStatus.DISCONNECTED;
-        }
-    }
-
-    /**
-     * Blocks until reading a {@link Packet} or until the
-     * read thread encounters bad data.
-     *
-     * @return A valid {@link Packet}.
-     * @throws IOException   If the pipe breaks.
-     * @throws JSONException If the read thread receives bad data.
-     */
-    public abstract Packet read() throws IOException, JSONException;
-
-    public abstract void write(byte[] b) throws IOException;
-
-    /**
      * Generates a nonce.
      *
      * @return A random {@link UUID}.
@@ -193,27 +164,6 @@ public abstract class Pipe {
     private static String generateNonce() {
         return UUID.randomUUID().toString();
     }
-
-    public PipeStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(PipeStatus status) {
-        this.status = status;
-    }
-
-    public void setListener(IPCListener listener) {
-        this.listener = listener;
-    }
-
-    public abstract void close() throws IOException;
-
-    public DiscordBuild getDiscordBuild() {
-        return build;
-    }
-
-    // a list of system property keys to get IPC file from different unix systems.
-    private final static String[] unixPaths = {"XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"};
 
     /**
      * Finds the IPC location in the current system.
@@ -233,5 +183,60 @@ public abstract class Pipe {
         if (tmppath == null)
             tmppath = "/tmp";
         return tmppath + "/discord-ipc-" + i;
+    }
+
+    /**
+     * Sends json with the given {@link Packet.OpCode}.
+     *
+     * @param op       The {@link Packet.OpCode} to send data with.
+     * @param data     The data to send.
+     * @param callback callback for the response
+     */
+    public void send(Packet.OpCode op, JsonObject data, Callback callback) {
+        try {
+            String nonce = generateNonce();
+            data.addProperty("nonce", nonce);
+
+            Packet p = new Packet(op, data);
+            if (callback != null && !callback.isEmpty())
+                callbacks.put(nonce, callback);
+            write(p.toBytes());
+            LOGGER.debug(String.format("Sent packet: %s", p.toString()));
+            if (listener != null)
+                listener.onPacketSent(ipcClient, p);
+        } catch (IOException ex) {
+            LOGGER.error("Encountered an IOException while sending a packet and disconnected!");
+            status = PipeStatus.DISCONNECTED;
+        }
+    }
+
+    /**
+     * Blocks until reading a {@link Packet} or until the
+     * read thread encounters bad data.
+     *
+     * @return A valid {@link Packet}.
+     * @throws IOException        If the pipe breaks.
+     * @throws JsonParseException If the read thread receives bad data.
+     */
+    public abstract Packet read() throws IOException, JsonParseException;
+
+    public abstract void write(byte[] b) throws IOException;
+
+    public PipeStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(PipeStatus status) {
+        this.status = status;
+    }
+
+    public void setListener(IPCListener listener) {
+        this.listener = listener;
+    }
+
+    public abstract void close() throws IOException;
+
+    public DiscordBuild getDiscordBuild() {
+        return build;
     }
 }

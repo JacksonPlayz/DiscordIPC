@@ -15,7 +15,7 @@
  */
 package com.jagrosh.discordipc.entities;
 
-import org.json.JSONObject;
+import com.google.gson.JsonObject;
 
 import java.nio.ByteBuffer;
 
@@ -27,15 +27,15 @@ import java.nio.ByteBuffer;
  */
 public class Packet {
     private final OpCode op;
-    private final JSONObject data;
+    private final JsonObject data;
 
     /**
-     * Constructs a new Packet using an {@link OpCode} and {@link JSONObject}.
+     * Constructs a new Packet using an {@link OpCode} and {@link JsonObject}.
      *
      * @param op   The OpCode value of this new Packet.
      * @param data The JSONObject payload of this new Packet.
      */
-    public Packet(OpCode op, JSONObject data) {
+    public Packet(OpCode op, JsonObject data) {
         this.op = op;
         this.data = data;
     }
@@ -64,11 +64,11 @@ public class Packet {
     }
 
     /**
-     * Gets the {@link JSONObject} value as a part of this {@link Packet}.
+     * Gets the {@link JsonObject} value as a part of this {@link Packet}.
      *
      * @return The JSONObject value of this Packet.
      */
-    public JSONObject getJson() {
+    public JsonObject getJson() {
         return data;
     }
 

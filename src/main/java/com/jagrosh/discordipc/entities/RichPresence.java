@@ -15,10 +15,11 @@
  */
 package com.jagrosh.discordipc.entities;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 /**
@@ -69,7 +70,7 @@ public class RichPresence {
     }
 
     /**
-     * Constructs a {@link JSONObject} representing a payload to send to discord
+     * Constructs a {@link JsonObject} representing a payload to send to discord
      * to update a user's Rich Presence.
      *
      * <p>This is purely internal, and should not ever need to be called outside of
@@ -77,35 +78,84 @@ public class RichPresence {
      *
      * @return A JSONObject payload for updating a user's Rich Presence.
      */
-    public JSONObject toJson() {
-        JSONObject payload = new JSONObject()
-                .put("state", state)
-                .put("details", details)
-                .put("timestamps", new JSONObject()
-                        .put("start", startTimestamp == 0L ? null : startTimestamp)
-                        .put("end", endTimestamp == 0L ? null : endTimestamp))
-                .put("assets", new JSONObject()
-                        .put("large_image", largeImageKey)
-                        .put("large_text", largeImageText)
-                        .put("small_image", smallImageKey)
-                        .put("small_text", smallImageText))
-                .put("party", partyId == null ? null : new JSONObject()
-                        .put("id", partyId)
-                        .put("size", new JSONArray().put(partySize).put(partyMax)))
-                .put("instance", instance);
+    public JsonObject toJson() {
+        JsonObject payload = new JsonObject();
 
-        if (buttons == null) {
-            payload.put("secrets", new JSONObject()
-                    .put("join", joinSecret)
-                    .put("spectate", spectateSecret)
-                    .put("match", matchSecret));
-        } else {
-            payload.put("buttons", new JSONArray(Arrays.stream(buttons)
-                    .limit(2)
-                    .map(button -> new JSONObject().put("label", button.label).put("url", button.url))
-                    .collect(Collectors.toList())));
+        if (state != null && !state.isEmpty())
+            payload.addProperty("state", state);
+        if (details != null && !details.isEmpty())
+            payload.addProperty("details", details);
+
+        if (startTimestamp > 0L) {
+            JsonObject timestamps = new JsonObject();
+            timestamps.addProperty("start", startTimestamp);
+            if (endTimestamp >= startTimestamp)
+                timestamps.addProperty("end", endTimestamp);
+
+            payload.add("timestamps", timestamps);
         }
 
+        JsonObject assets = new JsonObject();
+        if (largeImageKey != null && !largeImageKey.isEmpty()) {
+            assets.addProperty("large_image", largeImageKey);
+
+            if (largeImageText != null && !largeImageText.isEmpty())
+                assets.addProperty("large_text", largeImageText);
+        }
+        if (smallImageKey != null && !smallImageKey.isEmpty()) {
+            assets.addProperty("small_image", smallImageKey);
+            if (smallImageText != null && !smallImageText.isEmpty())
+                assets.addProperty("small_text", smallImageText);
+        }
+
+        if (assets.has("large_image") || assets.has("small_image"))
+            payload.add("assets", assets);
+
+        if (partyId != null) {
+            JsonObject party = new JsonObject();
+            party.addProperty("id", partyId);
+
+            JsonArray partySizes = new JsonArray();
+            if (partySize > 0) {
+                partySizes.add(partySize);
+                if (partyMax >= partySize)
+                    partySizes.add(partyMax);
+            }
+            party.add("size", partySizes);
+            payload.add("party", party);
+        }
+
+        if (buttons == null) {
+            JsonObject secrets = new JsonObject();
+            if (joinSecret != null && !joinSecret.isEmpty())
+                secrets.addProperty("join", joinSecret);
+            if (spectateSecret != null && !spectateSecret.isEmpty())
+                secrets.addProperty("spectate", spectateSecret);
+            if (matchSecret != null && !matchSecret.isEmpty())
+                secrets.addProperty("match", matchSecret);
+
+            if (secrets.has("join") || secrets.has("spectate") || secrets.has("match"))
+                payload.add("secrets", secrets);
+        } else {
+            List<JsonObject> buttonList = Arrays.stream(buttons)
+                    .limit(2)
+                    .map(button -> {
+                        JsonObject buttonJson = new JsonObject();
+                        buttonJson.addProperty("label", button.label);
+                        buttonJson.addProperty("url", button.url);
+                        return buttonJson;
+                    })
+                    .collect(Collectors.toList());
+
+            JsonArray buttonArray = new JsonArray();
+            for (JsonObject button : buttonList)
+                buttonArray.add(button);
+
+            if (buttonArray.size() > 0)
+                payload.add("buttons", buttonArray);
+        }
+
+        payload.addProperty("instance", instance);
         return payload;
     }
 
