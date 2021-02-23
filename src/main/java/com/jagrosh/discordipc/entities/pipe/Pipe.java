@@ -24,8 +24,8 @@ import com.jagrosh.discordipc.entities.Callback;
 import com.jagrosh.discordipc.entities.DiscordBuild;
 import com.jagrosh.discordipc.entities.Packet;
 import com.jagrosh.discordipc.exceptions.NoDiscordClientException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -33,7 +33,7 @@ import java.util.UUID;
 
 public abstract class Pipe {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Pipe.class);
+    private static final Logger LOGGER = LogManager.getLogger();
     private static final int VERSION = 1;
     // a list of system property keys to get IPC file from different unix systems.
     private final static String[] unixPaths = {"XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"};

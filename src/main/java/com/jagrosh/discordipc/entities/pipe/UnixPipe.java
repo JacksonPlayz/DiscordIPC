@@ -22,10 +22,10 @@ import com.google.gson.JsonParser;
 import com.jagrosh.discordipc.IPCClient;
 import com.jagrosh.discordipc.entities.Callback;
 import com.jagrosh.discordipc.entities.Packet;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.newsclub.net.unix.AFUNIXSocket;
 import org.newsclub.net.unix.AFUNIXSocketAddress;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -35,7 +35,7 @@ import java.util.HashMap;
 
 public class UnixPipe extends Pipe {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(UnixPipe.class);
+    private static final Logger LOGGER = LogManager.getLogger();
     private final AFUNIXSocket socket;
 
     UnixPipe(IPCClient ipcClient, HashMap<String, Callback> callbacks, String location) throws IOException {

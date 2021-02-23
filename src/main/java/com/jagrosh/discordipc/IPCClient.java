@@ -26,8 +26,8 @@ import com.jagrosh.discordipc.entities.User;
 import com.jagrosh.discordipc.entities.pipe.Pipe;
 import com.jagrosh.discordipc.entities.pipe.PipeStatus;
 import com.jagrosh.discordipc.exceptions.NoDiscordClientException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -58,7 +58,7 @@ import java.util.HashMap;
  * @author John Grosh (john.a.grosh@gmail.com)
  */
 public final class IPCClient implements Closeable {
-    private static final Logger LOGGER = LoggerFactory.getLogger(IPCClient.class);
+    private static final Logger LOGGER = LogManager.getLogger();
     private final long clientId;
     private final HashMap<String, Callback> callbacks = new HashMap<>();
     private volatile Pipe pipe;
