@@ -6,6 +6,20 @@
     <version>0.4</version>
     <packaging>jar</packaging>
 
+    <repositories>
+        <repository>
+            <id>repo</id>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>ignore</checksumPolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+            <url>file://${project.basedir}/repo</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>com.google.code.gson</groupId>
@@ -31,6 +45,12 @@
             <groupId>com.kohlschutter.junixsocket</groupId>
             <artifactId>junixsocket-native-common</artifactId>
             <version>2.3.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.kohlschutter.junixsocket</groupId>
+            <artifactId>junixsocket-native-custom</artifactId>
+            <version>2.3.2</version>
+            <classifier>aarch64-MacOSX-gpp-jni</classifier>
         </dependency>
     </dependencies>
     
