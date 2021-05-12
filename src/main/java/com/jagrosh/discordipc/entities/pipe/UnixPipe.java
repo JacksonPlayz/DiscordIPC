@@ -24,33 +24,32 @@ import com.jagrosh.discordipc.entities.Callback;
 import com.jagrosh.discordipc.entities.Packet;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.newsclub.net.unix.AFUNIXSocket;
-import org.newsclub.net.unix.AFUNIXSocketAddress;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Socket;
+import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 
 public class UnixPipe extends Pipe {
 
     private static final Logger LOGGER = LogManager.getLogger();
-    private final AFUNIXSocket socket;
+    private final Socket socket;
 
     UnixPipe(IPCClient ipcClient, HashMap<String, Callback> callbacks, String location) throws IOException {
         super(ipcClient, callbacks);
 
-        socket = AFUNIXSocket.newInstance();
-        socket.connect(new AFUNIXSocketAddress(new File(location)));
+        this.socket = new Socket();
+        this.socket.connect(UnixDomainSocketAddress.of(location));
     }
 
     @SuppressWarnings("ResultOfMethodCallIgnored")
     @Override
     public Packet read() throws IOException, JsonParseException {
-        InputStream is = socket.getInputStream();
+        InputStream is = this.socket.getInputStream();
 
-        while (is.available() == 0 && status == PipeStatus.CONNECTED) {
+        while (is.available() == 0 && this.status == PipeStatus.CONNECTED) {
             try {
                 Thread.sleep(50);
             } catch (InterruptedException ignored) {
@@ -63,10 +62,10 @@ public class UnixPipe extends Pipe {
 
         if (true) return null;*/
 
-        if (status == PipeStatus.DISCONNECTED)
+        if (this.status == PipeStatus.DISCONNECTED)
             throw new IOException("Disconnected!");
 
-        if (status == PipeStatus.CLOSED)
+        if (this.status == PipeStatus.CLOSED)
             return new Packet(Packet.OpCode.CLOSE, null);
 
         // Read the op and length. Both are signed ints
@@ -79,22 +78,22 @@ public class UnixPipe extends Pipe {
 
         is.read(d);
         Packet p = new Packet(op, new JsonParser().parse(new String(d)).getAsJsonObject());
-        LOGGER.debug(String.format("Received packet: %s", p.toString()));
-        if (listener != null)
-            listener.onPacketReceived(ipcClient, p);
+        LOGGER.debug(String.format("Received packet: %s", p));
+        if (this.listener != null)
+            this.listener.onPacketReceived(this.ipcClient, p);
         return p;
     }
 
     @Override
     public void write(byte[] b) throws IOException {
-        socket.getOutputStream().write(b);
+        this.socket.getOutputStream().write(b);
     }
 
     @Override
     public void close() throws IOException {
         LOGGER.debug("Closing IPC pipe...");
-        send(Packet.OpCode.CLOSE, new JsonObject(), null);
-        status = PipeStatus.CLOSED;
-        socket.close();
+        this.send(Packet.OpCode.CLOSE, new JsonObject(), null);
+        this.status = PipeStatus.CLOSED;
+        this.socket.close();
     }
 }
