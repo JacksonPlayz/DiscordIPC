@@ -28,40 +28,26 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
+import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.util.HashMap;
 
 public class UnixPipe extends Pipe {
 
     private static final Logger LOGGER = LogManager.getLogger();
-    private final Socket socket;
+    private final SocketChannel channel;
 
     UnixPipe(IPCClient ipcClient, HashMap<String, Callback> callbacks, String location) throws IOException {
         super(ipcClient, callbacks);
 
-        this.socket = new Socket();
-        this.socket.connect(UnixDomainSocketAddress.of(location));
+        this.channel = SocketChannel.open(StandardProtocolFamily.UNIX);
+        this.channel.connect(UnixDomainSocketAddress.of(location));
     }
 
-    @SuppressWarnings("ResultOfMethodCallIgnored")
     @Override
     public Packet read() throws IOException, JsonParseException {
-        InputStream is = this.socket.getInputStream();
-
-        while (is.available() == 0 && this.status == PipeStatus.CONNECTED) {
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException ignored) {
-            }
-        }
-
-        /*byte[] buf = new byte[is.available()];
-        is.read(buf, 0, buf.length);
-        LOGGER.info(new String(buf));
-
-        if (true) return null;*/
-
         if (this.status == PipeStatus.DISCONNECTED)
             throw new IOException("Disconnected!");
 
@@ -69,15 +55,20 @@ public class UnixPipe extends Pipe {
             return new Packet(Packet.OpCode.CLOSE, null);
 
         // Read the op and length. Both are signed ints
-        byte[] d = new byte[8];
-        is.read(d);
-        ByteBuffer bb = ByteBuffer.wrap(d);
+        ByteBuffer buf = ByteBuffer.allocate(8);
+        while (buf.position() < buf.capacity()) {
+            this.channel.read(buf);
+        }
+        buf.flip();
 
-        Packet.OpCode op = Packet.OpCode.values()[Integer.reverseBytes(bb.getInt())];
-        d = new byte[Integer.reverseBytes(bb.getInt())];
+        Packet.OpCode op = Packet.OpCode.values()[Integer.reverseBytes(buf.getInt())];
+        buf = ByteBuffer.allocate(Integer.reverseBytes(buf.getInt()));
+        while (buf.position() < buf.capacity()) {
+            this.channel.read(buf);
+        }
+        buf.flip();
 
-        is.read(d);
-        Packet p = new Packet(op, new JsonParser().parse(new String(d)).getAsJsonObject());
+        Packet p = new Packet(op, new JsonParser().parse(new String(buf.array())).getAsJsonObject());
         LOGGER.debug(String.format("Received packet: %s", p));
         if (this.listener != null)
             this.listener.onPacketReceived(this.ipcClient, p);
@@ -86,7 +77,12 @@ public class UnixPipe extends Pipe {
 
     @Override
     public void write(byte[] b) throws IOException {
-        this.socket.getOutputStream().write(b);
+        ByteBuffer buf = ByteBuffer.allocate(b.length);
+        buf.put(b);
+        buf.flip();
+        while (buf.hasRemaining()) {
+            this.channel.write(buf);
+        }
     }
 
     @Override
@@ -94,6 +90,6 @@ public class UnixPipe extends Pipe {
         LOGGER.debug("Closing IPC pipe...");
         this.send(Packet.OpCode.CLOSE, new JsonObject(), null);
         this.status = PipeStatus.CLOSED;
-        this.socket.close();
+        this.channel.close();
     }
 }
